@@ -71,6 +71,9 @@ const typeDefs = `
       username: String!
       password: String!
     ): Token
+    addAsFriend(
+      name: String!
+    ): User
   }
 `
 
@@ -92,11 +95,22 @@ const resolvers = {
     })
   },
   Mutation: {
-    addPerson: async (root, args) => {
+    addPerson: async (root, args, context) => {
       const person = new Person({ ...args })
+      const currentUser = context.currentUser
+
+      if (!currentUser) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+          }
+        })
+      }
 
       try {
-        return person.save()
+        await person.save()
+        currentUser.friends.concat(person)
+        await currentUser.save()
       } catch (error) {
         throw new GraphQLError('Saving person failed', {
           extensions: {
@@ -106,6 +120,8 @@ const resolvers = {
           }
         })
       }
+
+      return person
     },
     editNumber: async (root, args) => {
       const person = await Person.findOne({ name: args.name })
@@ -154,6 +170,26 @@ const resolvers = {
       }
 
       return { value: jwt.sign(userForToken, process.env.JWT_SECRET) }
+    },
+    addAsFriend: async (root, args, { currentUser }) => {
+      const isFriend = person =>
+        currentUser.friends.map(f => f._id.toString()).includes(person._id.toString())
+
+      if (!currentUser) {
+        throw new GraphQLError('Wrong credentials', {
+          extensions: { code: 'BAD_USER_INPUT' }
+        })
+      }
+
+      const person = await Person.findOne({ name: args.name })
+
+      if (!isFriend(person)) {
+        currentUser.friends = currentUser.friends.concat(person)
+      }
+
+      await currentUser.save()
+
+      return currentUser
     },
   }
 }
